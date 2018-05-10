@@ -1,7 +1,7 @@
 # paraphrase_identification
 
 Keras implementations of three Deep Learning models for paraphrase identification.
-It is a part of my PhD. thesis.
+It is a part of my PhD thesis.
 
  - Sanchez-Perez, M.A. 2018 "Plagiarism Detection through Paraphrase Identification", PhD thesis, Centro de Investigación en Computación, Instituto Politécnico Nacional, Mexico City, Mexico.
 
