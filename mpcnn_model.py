@@ -404,7 +404,6 @@ def he_model_siamese(input_shape, filters_ga, filters_gb,
             feats = Concatenate(name="feats")([feaa, feab])
     elif algtype == "both":
         feah = algo1(s1_ga_pools, s2_ga_pools, use_cos, use_euc)
-        print(use_cos, use_euc, use_abs)
         feaa, feab = algo2(s1_ga_pools, s1_gb_pools, s2_ga_pools, s2_gb_pools, use_cos, use_euc, use_abs)
         if grouptype == "group_a_only":
             # Means feab = None
@@ -413,10 +412,10 @@ def he_model_siamese(input_shape, filters_ga, filters_gb,
         elif grouptype == "both":
             feats = Concatenate(name="feats")([feah, feaa, feab])
 
-    #X = Dense(hidden_units_merger, name="fully_connected",
-    #          kernel_regularizer=regularizer, activation="tanh")(feats)
-    # X = Dense(2, name="output", kernel_regularizer=regularizer, activation="softmax")(X)
-    X = Dense(2, name="output", kernel_regularizer=regularizer, activation="softmax")(feats)
+    X = Dense(hidden_units_merger, name="fully_connected",
+              kernel_regularizer=regularizer, activation="tanh")(feats)
+    X = Dense(2, name="output", kernel_regularizer=regularizer, activation="softmax")(X)
+    #X = Dense(2, name="output", kernel_regularizer=regularizer, activation="softmax")(feats)
 
     siamese_net = Model(inputs=[X1_input, X2_input], outputs=X, name="he_model_siamese")
     return siamese_net, base_model
