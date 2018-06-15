@@ -35,8 +35,9 @@ from keras import backend as K
 
 from keras import optimizers
 from keras.utils import to_categorical
-from keras.callbacks import Callback, EarlyStopping, TerminateOnNaN
+from keras.callbacks import Callback, EarlyStopping, TerminateOnNaN, ModelCheckpoint
 from keras.layers import Lambda, GlobalMaxPooling1D
+from keras.models import load_model
 
 from sklearn.metrics import accuracy_score, f1_score, log_loss, confusion_matrix
 import pickle
@@ -204,51 +205,51 @@ def argument_parser():
             dest="use_algo2",
             action="store_false")
 
-    parser.add_argument("--cos_a1",
+    parser.add_argument("--cos-a1",
             dest="use_cos_a1",
             action="store_true",
             help="Defines if using cosine similarity in algorithm 1.")
-    parser.add_argument("--no-cos_a1",
+    parser.add_argument("--no-cos-a1",
             dest="use_cos_a1",
             action="store_false")
 
-    parser.add_argument("--euc_a1",
+    parser.add_argument("--euc-a1",
             dest="use_euc_a1",
             action="store_true",
             help="Defines if using Euclidean distance in algorithm 1.")
-    parser.add_argument("--no-euc_a1",
+    parser.add_argument("--no-euc-a1",
             dest="use_euc_a1",
             action="store_false")
 
-    parser.add_argument("--abs_a1",
+    parser.add_argument("--abs-a1",
             dest="use_abs_a1",
             action="store_true",
             help="Defines if using absolute difference in algorithm 1.")
-    parser.add_argument("--no-abs_a1",
+    parser.add_argument("--no-abs-a1",
             dest="use_abs_a1",
             action="store_false")
 
-    parser.add_argument("--cos_a2",
+    parser.add_argument("--cos-a2",
             dest="use_cos_a2",
             action="store_true",
             help="Defines if using cosine similarity in algorithm 2.")
-    parser.add_argument("--no-cos_a2",
+    parser.add_argument("--no-cos-a2",
             dest="use_cos_a2",
             action="store_false")
 
-    parser.add_argument("--euc_a2",
+    parser.add_argument("--euc-a2",
             dest="use_euc_a2",
             action="store_true",
             help="Defines if using Euclidean distance in algorithm 2.")
-    parser.add_argument("--no-euc_a2",
+    parser.add_argument("--no-euc-a2",
             dest="use_euc_a2",
             action="store_false")
 
-    parser.add_argument("--abs_a2",
+    parser.add_argument("--abs-a2",
             dest="use_abs_a2",
             action="store_true",
             help="Defines if using absolute difference in algorithm 2.")
-    parser.add_argument("--no-abs_a2",
+    parser.add_argument("--no-abs-a2",
             dest="use_abs_a2",
             action="store_false")
 
@@ -539,12 +540,19 @@ if __name__ == "__main__":
     print(f1)
     cm = confusion_matrix(Y_test, predclass)
     print(cm)
+
+    # Date used to keep track of experiments
+    date = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    checkpointer = ModelCheckpoint(filepath="../checkpoints/he_mpcnn/cp_{}.hdf5".format(date), verbose=1, save_best_only=True, monitor="val_acc", mode="max")
+    my_calls.append(checkpointer)
+
     history = siamese_model.fit(x=[X_train1, X_train2],
                                 y=to_categorical(Y_train),
                                 epochs=args.epochs,
                                 batch_size=args.batch_size,
                                 #validation_data=([X_test1, X_test2], to_categorical(Y_test)),
-                                validation_split=0.05,
+                                validation_split=0.2,
                                 class_weight=class_weight,
                                 callbacks=my_calls)
     print("Done!")
@@ -561,14 +569,37 @@ if __name__ == "__main__":
 
     # Evaluating
     #print(siamese_model.evaluate(x=[X_test1, X_test2], y=to_categorical(Y_test)))
-    print("======================\nLast epoch predictions\n=====================")
+    print("======================\nLast epoch predictions\n======================")
     pred = siamese_model.predict(x=[X_test1, X_test2])
     predclass=np.argmax(pred, axis=1)
-    print("acc:", accuracy_score(Y_test, predclass))
-    print("f1: ", f1_score(Y_test, predclass))
+    test_acc = accuracy_score(Y_test, predclass)
+    test_f1 = f1_score(Y_test, predclass)
+    test_confusion_matrix = confusion_matrix(Y_test, predclass)
+    print("acc:", test_acc)
+    print("f1: ", test_f1)
     print("confusion matrix")
-    print(confusion_matrix(Y_test, predclass))
+    print(test_confusion_matrix)
+    history.history["last_epoch_pred"] = pred
+    history.history["last_epoch_test_acc"] = test_acc
+    history.history["last_epoch_test_f1"] = test_f1
+    history.history["last_epoch_test_confusion_matrix"] = test_confusion_matrix
 
-    date = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    with open("./runs/run_{}_he_approach.p".format(date), "wb") as fid:
+    print("======================\nBest epoch predictions\n======================")
+    # Loading best epoch model
+    best_model = load_model("../checkpoints/he_mpcnn/cp_{}.hdf5".format(date))
+    pred = best_model.predict(x=[X_test1, X_test2])
+    predclass=np.argmax(pred, axis=1)
+    test_acc = accuracy_score(Y_test, predclass)
+    test_f1 = f1_score(Y_test, predclass)
+    test_confusion_matrix = confusion_matrix(Y_test, predclass)
+    print("acc:", test_acc)
+    print("f1: ", test_f1)
+    print("confusion matrix")
+    print(test_confusion_matrix)
+    history.history["best_epoch_pred"] = pred
+    history.history["best_epoch_test_acc"] = test_acc
+    history.history["best_epoch_test_f1"] = test_f1
+    history.history["best_epoch_test_confusion_matrix"] = test_confusion_matrix
+
+    with open("../runs/he_mpcnn/run_{}_he_approach.p".format(date), "wb") as fid:
         pickle.dump([history.history, args], fid)
