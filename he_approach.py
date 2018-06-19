@@ -16,8 +16,8 @@ os.environ["PYTHONHASHSEED"] = "0"
 # Needed for reproducibility
 import numpy as np
 import random as rn
-np.random.seed(1)
-rn.seed(2)
+# np.random.seed(1)
+# rn.seed(2)
 
 # Needed for reproducibility
 # Specific backend
@@ -38,6 +38,7 @@ from keras.utils import to_categorical
 from keras.callbacks import Callback, EarlyStopping, TerminateOnNaN, ModelCheckpoint
 from keras.layers import Lambda, GlobalMaxPooling1D
 from keras.models import load_model
+from future_keras import DepthwiseConv2D
 
 from sklearn.metrics import accuracy_score, f1_score, log_loss, confusion_matrix
 import pickle
@@ -554,7 +555,8 @@ if __name__ == "__main__":
                                 #validation_data=([X_test1, X_test2], to_categorical(Y_test)),
                                 validation_split=0.2,
                                 class_weight=class_weight,
-                                callbacks=my_calls)
+                                callbacks=my_calls,
+                                verbose=2)
     print("Done!")
     print("\n")
     # Temporarily printing some weights
@@ -586,7 +588,11 @@ if __name__ == "__main__":
 
     print("======================\nBest epoch predictions\n======================")
     # Loading best epoch model
-    best_model = load_model("../checkpoints/he_mpcnn/cp_{}.hdf5".format(date))
+    if args.conv2d_type:
+        best_model = load_model("../checkpoints/he_mpcnn/cp_{}.hdf5".format(date))
+    else:
+        best_model = load_model("../checkpoints/he_mpcnn/cp_{}.hdf5".format(date),
+                custom_objects={"DepthwiseConv2D":DepthwiseConv2D})
     pred = best_model.predict(x=[X_test1, X_test2])
     predclass=np.argmax(pred, axis=1)
     test_acc = accuracy_score(Y_test, predclass)
