@@ -7,7 +7,7 @@ from keras.layers import BatchNormalization
 from keras import regularizers
 from future_keras import DepthwiseConv2D
 
-def group_a(embedding_layer, filters, poolings, regularizer):
+def group_a(embedding_layer, filters, poolings, conv_act, regularizer):
     """ Returns a list with a tensor for each pooling function,
     where each tensor is of the shape:
     [?, len(filters), fnum]"""
@@ -26,7 +26,7 @@ def group_a(embedding_layer, filters, poolings, regularizer):
                            strides=1,
                            padding="valid",
                            kernel_regularizer=regularizer,
-                           activation="tanh",
+                           activation=conv_act,
                            name="ga_conv_pool{}_ws{}".format(i, fsize))(embedding_layer)
                 #X = BatchNormalization()(X)
                 X = Pool(X)
@@ -44,7 +44,7 @@ def group_a(embedding_layer, filters, poolings, regularizer):
     return outputs
 
 
-def group_b(embedding_layer, embedding_dim, max_seq_length, filters, poolings, conv2d_type, regularizer, cnn_type="Conv2D"):
+def group_b(embedding_layer, embedding_dim, max_seq_length, filters, poolings, conv2d_type, conv_act, regularizer):
     """ Returns a list with a tensor for each pooling function,
     where each tensor is of the shape:
     [?, embedding_dim, fnum]"""
@@ -74,7 +74,7 @@ def group_b(embedding_layer, embedding_dim, max_seq_length, filters, poolings, c
                                strides=(1,1),
                                padding="valid",
                                kernel_regularizer=regularizer,
-                               activation="tanh",
+                               activation=conv_act,
                                name="gb_conv_pool{}_ws{}".format(i, fsize))(new_embedding_layer)
                 else:
                     # Output shape: (?, max_seq_lenght, 1, embedding_dim * fnum)
@@ -83,7 +83,7 @@ def group_b(embedding_layer, embedding_dim, max_seq_length, filters, poolings, c
                                         padding="valid",
                                         depth_multiplier=fnum,
                                         kernel_regularizer=regularizer,
-                                        activation="tanh",
+                                        activation=conv_act,
                                         name="gb_conv_pool{}_ws{}".format(i, fsize))(new_embedding_layer)
                     # Output shape: (?, max_seq_length-fszie+1, embedding_dim, fnum)
                     X = Reshape((-1, embedding_dim, fnum))(X)
@@ -103,8 +103,8 @@ def group_b(embedding_layer, embedding_dim, max_seq_length, filters, poolings, c
 
 
 def he_encoder(input_shape, filters_ga, filters_gb,
-               conv2d_type, embeddings_dims, embeddings_matrices,
-               word_to_index, max_seq_length,
+               conv2d_type, conv_act, embeddings_dims,
+               embeddings_matrices, word_to_index, max_seq_length,
                trainable_embeddings, use_groupa, use_groupb,
                regularizer, poolings_ga, poolings_gb):
     """input shape: (None, max_seq_length)
@@ -134,18 +134,18 @@ def he_encoder(input_shape, filters_ga, filters_gb,
     assert use_groupa or use_groupb, "You must use Group A, B or both"
 
     if use_groupa and not use_groupb:
-        ga_output = group_a(embedding_layer, filters_ga, poolings_ga, regularizer)
+        ga_output = group_a(embedding_layer, filters_ga, poolings_ga, conv_act, regularizer)
         my_model = Model(inputs=X_input,
                          outputs=ga_output,
                          name="he_model")
     elif not use_groupa and use_groupb:
-        gb_output = group_b(embedding_layer, embedding_dim, max_seq_length, filters_gb, poolings_gb, conv2d_type, regularizer, "DepthwiseConv2D")
+        gb_output = group_b(embedding_layer, embedding_dim, max_seq_length, filters_gb, poolings_gb, conv2d_type, conv_act, regularizer)
         my_model = Model(inputs=X_input,
                          outputs=gb_output,
                          name="he_model")
     elif use_groupa and use_groupb:
-        ga_output = group_a(embedding_layer, filters_ga, poolings_ga, regularizer)
-        gb_output = group_b(embedding_layer, embedding_dim, max_seq_length, filters_gb, poolings_gb, conv2d_type, regularizer, "DepthwiseConv2D")
+        ga_output = group_a(embedding_layer, filters_ga, poolings_ga, conv_act, regularizer)
+        gb_output = group_b(embedding_layer, embedding_dim, max_seq_length, filters_gb, poolings_gb, conv2d_type, conv_act, regularizer)
         my_model = Model(inputs=X_input,
                          outputs=ga_output+gb_output,
                          name="he_model")
@@ -160,7 +160,7 @@ def algo1(s1_ga_pools, s2_ga_pools, use_cos, use_euc, use_abs):
                      pooling types [max, min, avg] where each entry has shape
                      (?, len(filters_ga), fnum_ga)
     """
-    assert use_cos or use_euc, "You should use either cos or euc"
+    assert use_cos or use_euc or use_abs, "You should use either cos, euc or abs"
     res = []
     i = 0
     for s1_ga, s2_ga in zip(s1_ga_pools, s2_ga_pools):
@@ -324,7 +324,8 @@ def algo2(s1_ga_pools, s1_gb_pools, s2_ga_pools, s2_gb_pools, use_cos, use_euc, 
 
 
 def he_model_siamese(input_shape, filters_ga, filters_gb,
-             conv2d_type, embeddings_dims, embeddings_matrices,
+             conv2d_type, conv_act, dense_act,
+             embeddings_dims, embeddings_matrices,
              word_to_index, max_seq_length, reg_value,
              hidden_units, trainable_embeddings, use_groupa,
              use_groupb, use_algo1, use_algo2, poolings_ga, poolings_gb,
@@ -332,15 +333,21 @@ def he_model_siamese(input_shape, filters_ga, filters_gb,
              use_euc_a2, use_abs_a1, use_abs_a2):
     # TODO: Add docstring and comments
 
-    assert use_algo1 or use_algo2, "You must use Algorithm 1, 2 or both"
+    #assert use_algo1 or use_algo2, "You must use Algorithm 1, 2 or both"
 
     # Allowed combinations of grouptype and algtype
     assert not(use_groupa and use_groupb and use_algo1 and not use_algo2), \
-            "Not a valid combination of groups and algorithms. Group B computed but not used. Algorithm 1 only uses Group A."
+            """Not a valid combination of groups and algorithms.
+               Group B computed but not used.
+               Algorithm 1 only uses Group A.
+               Use option --no-groupb"""
     assert not(not use_groupa and use_groupb and use_algo1 and use_algo2), \
-            "Not a valid combination of groups and algorithms. Algoritm 1 needs Group A."
+            """Not a valid combination of groups and algorithms.
+               Algoritm 1 needs Group A.
+               Remove option --no-groupa"""
     assert not(not use_groupa and use_groupb and use_algo1 and not use_algo2), \
-            "Not a valid combination of groups and algorithms. Group B needs Algorithm 2 while Algoritm 1 needs Group A."
+            """Not a valid combination of groups and algorithms.
+               Group B needs Algorithm 2 while Algoritm 1 needs Group A."""
 
     # Defining regularizer
     if reg_value != None:
@@ -350,8 +357,8 @@ def he_model_siamese(input_shape, filters_ga, filters_gb,
 
     # Generating encoder
     base_model = he_encoder((max_seq_length, ), filters_ga, filters_gb,
-                            conv2d_type, embeddings_dims, embeddings_matrices,
-                            word_to_index, max_seq_length,
+                            conv2d_type, conv_act, embeddings_dims,
+                            embeddings_matrices, word_to_index, max_seq_length,
                             trainable_embeddings, use_groupa, use_groupb,
                             regularizer, poolings_ga, poolings_gb)
 
@@ -404,9 +411,22 @@ def he_model_siamese(input_shape, filters_ga, filters_gb,
             feats = Concatenate(name="feats")([feah, feaa])
         elif use_groupa and use_groupb:
             feats = Concatenate(name="feats")([feah, feaa, feab])
+    else:
+        # No algorithm used. Flatten and concatenation used only.
+        if use_groupa and not use_groupb:
+            feats = Concatenate()([Flatten()(Concatenate(axis=1)(s1_ga_pools)),
+                                   Flatten()(Concatenate(axis=1)(s2_ga_pools))])
+        elif not use_groupa and use_groupb:
+            feats = Concatenate()([Flatten()(Concatenate(axis=1)(s1_gb_pools)),
+                                   Flatten()(Concatenate(axis=1)(s2_gb_pools))])
+        elif use_groupa and use_groupb:
+            feats = Concatenate()([Flatten()(Concatenate(axis=1)(s1_ga_pools)),
+                                   Flatten()(Concatenate(axis=1)(s2_ga_pools)),
+                                   Flatten()(Concatenate(axis=1)(s1_gb_pools)),
+                                   Flatten()(Concatenate(axis=1)(s2_gb_pools))])
 
     X = Dense(hidden_units, name="fully_connected",
-              kernel_regularizer=regularizer, activation="tanh")(feats)
+              kernel_regularizer=regularizer, activation=dense_act)(feats)
     X = Dense(2, name="output", kernel_regularizer=regularizer, activation="softmax")(X)
 
     siamese_net = Model(inputs=[X1_input, X2_input], outputs=X, name="he_model_siamese")

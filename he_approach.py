@@ -48,10 +48,20 @@ import argparse
 import datetime
 
 def argument_parser():
+    # TODO: Add constraints and validations to the parameters like exclusivity
+    # or removing redundant parameters defined as default values
     parser = argparse.ArgumentParser(description="""Multi-Perspective Sentence Similarity applied to Paraphrase Identification.
-            The model is described in: He, H., Gimpel, K., Lin, J.J.: Multi-perspective sentence similarity modeling with convolutional neural networks. In: Proceedings of the 2015 Conference on Empirical Methods in Natural Language Processing. pp. 1576–1586. Association for Computational Linguistics, Lisbon, Portugal (September 2015)
+            The model is described in:
+            He, H., Gimpel, K., Lin, J.J.:
+            Multi-perspective sentence similarity modeling with convolutional neural networks.
+            In: Proceedings of the 2015 Conference on Empirical Methods in Natural Language Processing.
+            pp. 1576–1586. Association for Computational Linguistics, Lisbon, Portugal (September 2015)
 
-            When using this code please cite: Sanchez-Perez, M.A. 2018 "Plagiarism Detection through Paraphrase Identification", PhD thesis, Centro de Investigación en Computación, Instituto Politécnico Nacional, Mexico City, Mexico.""",
+            When using this code please cite:
+            Sanchez-Perez, M.A. 2018
+            "Plagiarism Detection through Paraphrase Identification",
+            PhD thesis, Centro de Investigación en Computación,
+            Instituto Politécnico Nacional, Mexico City, Mexico.""",
                                      formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("--version",
             type=str,
@@ -167,6 +177,18 @@ def argument_parser():
             type=float,
             dest="reg_value",
             help="L2 regulatization value.")
+
+    parser.add_argument("--conv-act",
+            type=str,
+            dest="conv_act",
+            choices=("tanh", "relu", "sigmoid"),
+            help="Defines the activation functions of the convolutional layers")
+
+    parser.add_argument("--dense-act",
+            type=str,
+            dest="dense_act",
+            choices=("tanh", "relu", "sigmoid"),
+            help="Defines the activation functions of the convolutional layers")
 
     parser.add_argument("--groupa",
             dest="use_groupa",
@@ -299,6 +321,12 @@ def argument_parser():
             dest="print_model",
             action="store_false")
 
+    parser.add_argument("--verbose",
+            dest="verbosity",
+            type=int,
+            help="0, 1, or 2. Verbosity mode. 0 = silent, 1 = progress bar, 2 = one line per epoch.",
+            choices=(0,1,2))
+
     # Default parameters
     parser.set_defaults(# Related to preprocessed MRSPC data
                         version="20180611",
@@ -322,6 +350,8 @@ def argument_parser():
                         optimizer="adam",
                         lr=0.001,
                         loss="categorical_crossentropy",
+                        conv_act="tanh",
+                        dense_act="tanh",
                         # Group A
                         fnum_ga=525,
                         use_inf_ga=False,
@@ -346,45 +376,12 @@ def argument_parser():
 
                         # Others
                         print_encoder=False,
-                        print_model=False)
+                        print_model=False,
+                        verbosity=1)
 
     return parser.parse_args()
 
-
-if __name__ == "__main__":
-    args = argument_parser()
-
-    print("CUDA_VISIBLE_DEVICES", os.environ["CUDA_VISIBLE_DEVICES"])
-    print("\n")
-
-    # (None, args.holistic_fnum) represents the inf filter size. There is going to be an error
-    # if holistic_fnum != embeddings_size due to dimensions missmatching during concatenation
-    filters_ga = [(i+1, args.fnum_ga) for i in range(args.ngrams)]
-    if args.use_inf_ga:
-        filters_ga.append((None, args.fnum_ga))
-    filters_gb = [(i+1, args.fnum_gb) for i in range(args.ngrams)]
-    if args.use_inf_gb:
-        filters_gb.append((None, args.fnum_gb))
-
-    # Generating the pooling layers
-    poolings_ga = []
-    if "max" in args.poolings_ga:
-        poolings_ga.append(Lambda(lambda x: K.max(x, axis=1), name="ga_maxpool"))
-    if "min" in args.poolings_ga:
-        poolings_ga.append(Lambda(lambda x: K.min(x, axis=1), name="ga_minpool"))
-    if "mean" in args.poolings_ga:
-        #poolings_ga.append(Lambda(lambda x: K.sum(x, axis=1)/K.sum(K.cast(K.not_equal(x, 0), "float32"), axis=1) , name="ga_meanpool"))
-        poolings_ga.append(Lambda(lambda x: K.mean(x, axis=1), name="ga_meanpool"))
-
-    poolings_gb = []
-    if "max" in args.poolings_gb:
-        poolings_gb.append(Lambda(lambda x: K.max(x, axis=1), name="gb_maxpool"))
-    if "min" in args.poolings_gb:
-        poolings_gb.append(Lambda(lambda x: K.min(x, axis=1), name="gb_minpool"))
-    if "mean" in args.poolings_gb:
-        #poolings_gb.append(Lambda(lambda x: K.sum(x, axis=1)/K.sum(K.cast(K.not_equal(x, 0), "float32"), axis=1) , name="gb_meanpool"))
-        poolings_gb.append(Lambda(lambda x: K.mean(x, axis=1), name="gb_meanpool"))
-
+def load_data(args):
     # Loading embeddings matrices
     print("=======================\nLoading embedding files\n=======================")
     embedding_dims = []
@@ -431,9 +428,59 @@ if __name__ == "__main__":
     print("X_test:", X_test1.shape)
     print("Y_test:", Y_test.shape)
     print("\n")
+    return (word_to_index, max_seq_length,
+            X_train1, X_train2, Y_train,
+            X_test1, X_test2, Y_test,
+            embedding_dims, embedding_matrices)
+
+
+
+
+if __name__ == "__main__":
+    print("==============\nPROGRAM STARTS\n==============")
+    # Parsing command line arguments
+    args = argument_parser()
+
+    # Loading data and embeddings
+    (word_to_index, max_seq_length,
+     X_train1, X_train2, Y_train,
+     X_test1, X_test2, Y_test,
+     embedding_dims, embedding_matrices) = load_data(args)
+
+    # (None, args.holistic_fnum) represents the inf filter size. There will be an error
+    # if holistic_fnum != embeddings_size due to dimensions missmatching during concatenation
+    filters_ga = [(i+1, args.fnum_ga) for i in range(args.ngrams)]
+    if args.use_inf_ga:
+        assert sum(embedding_dims) == args.fnum_ga, "When using --inf-ga, fnum_ga = embeddings_dim is needed."
+        filters_ga.append((None, args.fnum_ga))
+    filters_gb = [(i+1, args.fnum_gb) for i in range(args.ngrams)]
+    if args.use_inf_gb:
+        assert sum(embedding_dims) != args.fnum_gb, "When using --inf-gb, fnum_gb = embeddings_dim is needed."
+        filters_gb.append((None, args.fnum_gb))
+
+    # Generating the pooling layers
+    poolings_ga = []
+    if "max" in args.poolings_ga:
+        poolings_ga.append(Lambda(lambda x: K.max(x, axis=1), name="ga_maxpool"))
+    if "min" in args.poolings_ga:
+        poolings_ga.append(Lambda(lambda x: K.min(x, axis=1), name="ga_minpool"))
+    if "mean" in args.poolings_ga:
+        #poolings_ga.append(Lambda(lambda x: K.sum(x, axis=1)/K.sum(K.cast(K.not_equal(x, 0), "float32"), axis=1) , name="ga_meanpool"))
+        poolings_ga.append(Lambda(lambda x: K.mean(x, axis=1), name="ga_meanpool"))
+
+    poolings_gb = []
+    if "max" in args.poolings_gb:
+        poolings_gb.append(Lambda(lambda x: K.max(x, axis=1), name="gb_maxpool"))
+    if "min" in args.poolings_gb:
+        poolings_gb.append(Lambda(lambda x: K.min(x, axis=1), name="gb_minpool"))
+    if "mean" in args.poolings_gb:
+        #poolings_gb.append(Lambda(lambda x: K.sum(x, axis=1)/K.sum(K.cast(K.not_equal(x, 0), "float32"), axis=1) , name="gb_meanpool"))
+        poolings_gb.append(Lambda(lambda x: K.mean(x, axis=1), name="gb_meanpool"))
 
     # Generating the model
-    print("================\nGenerating model\n================",)
+    print("================\nGenerating model\n================")
+    print("Convolution activation: {}".format(args.conv_act))
+    print("Dense activation: {}".format(args.dense_act))
     print("Group A: {}   Group B: {}".format(args.use_groupa, args.use_groupb))
     if args.use_groupa:
         print("Group A config\n--------------")
@@ -469,13 +516,19 @@ if __name__ == "__main__":
 
     model = mpcnn_model.he_model_siamese
     siamese_model, encoder = model((max_seq_length, ), filters_ga, filters_gb,
-                          args.conv2d_type, embedding_dims, embedding_matrices,
+                          args.conv2d_type, args.conv_act, args.dense_act,
+                          embedding_dims, embedding_matrices,
                           word_to_index, max_seq_length, args.reg_value,
                           args.hidden_units, args.trainable_embeddings,
                           args.use_groupa, args.use_groupb, args.use_algo1,
                           args.use_algo2, poolings_ga, poolings_gb,
                           args.use_cos_a1, args.use_cos_a2, args.use_euc_a1,
                           args.use_euc_a2, args.use_abs_a1, args.use_abs_a2)
+    trainable_count = int(np.sum([K.count_params(p) for p in set(siamese_model.trainable_weights)]))
+    non_trainable_count = int(np.sum([K.count_params(p) for p in set(siamese_model.non_trainable_weights)]))
+    print("Trainable parameters: {:,}".format(trainable_count))
+    print("Non-trainable parameters: {:,}".format(non_trainable_count))
+    print("Total parameters: {:,}".format(trainable_count + non_trainable_count))
     print("Done!")
     print("\n")
 
@@ -493,7 +546,7 @@ if __name__ == "__main__":
     if args.optimizer == "adam":
         optimizer = optimizers.Adam(lr=args.lr)#, clipnorm=1.)
     if args.optimizer == "sgd":
-        optimizer = optimizers.SGD(lr=args.lr)
+        optimizer = optimizers.SGD(lr=args.lr)#, clipnorm=1.)
     siamese_model.compile(optimizer=optimizer,
             loss=args.loss,
             metrics=["accuracy"])
@@ -531,6 +584,31 @@ if __name__ == "__main__":
     else:
         class_weight = None
 
+    # Custom class to keep track of prediction history
+    class PredHistory(Callback):
+        def __init__(self):
+            self.preds = []
+            self.acchis = []
+            self.f1his = []
+            self.cmhis = []
+        def on_epoch_end(self, epoch, logs=None):
+            pred=self.model.predict([self.validation_data[0], self.validation_data[1]])
+            self.preds.append(pred)
+            predclass=np.argmax(pred, axis=1)
+            goldstd = np.argmax(self.validation_data[2], axis=1)
+            acc = accuracy_score(goldstd, predclass)
+            print("val_acc: {:.4f}".format(acc))
+            self.acchis.append(acc)
+            f1 = f1_score(goldstd, predclass)
+            print("val_f1: {:.4f}".format(f1))
+            self.f1his.append(f1)
+            cm = confusion_matrix(goldstd, predclass)
+            print("val_conf_mat:\n{}".format(cm))
+            self.cmhis.append(cm)
+
+    perform_eval = PredHistory()
+    my_calls.append(perform_eval)
+
     # Initial prediction with random initialization
     print("Forward propagation with random values")
     pred=siamese_model.predict([X_test1, X_test2])
@@ -542,7 +620,7 @@ if __name__ == "__main__":
     cm = confusion_matrix(Y_test, predclass)
     print(cm)
 
-    # Date used to keep track of experiments
+    # Date used to keep track of the experiments
     date = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
     checkpointer = ModelCheckpoint(filepath="../checkpoints/he_mpcnn/cp_{}.hdf5".format(date), verbose=1, save_best_only=True, monitor="val_acc", mode="max")
@@ -556,7 +634,7 @@ if __name__ == "__main__":
                                 validation_split=0.2,
                                 class_weight=class_weight,
                                 callbacks=my_calls,
-                                verbose=2)
+                                verbose=args.verbosity)
     print("Done!")
     print("\n")
     # Temporarily printing some weights
@@ -607,5 +685,13 @@ if __name__ == "__main__":
     history.history["best_epoch_test_f1"] = test_f1
     history.history["best_epoch_test_confusion_matrix"] = test_confusion_matrix
 
+    # Adding to history the number of parameters
+    history.history["trainable_count"] = trainable_count
+    history.history["non_trainable_count"] = non_trainable_count
+    history.history["total_count"] = trainable_count + non_trainable_count
+
+
     with open("../runs/he_mpcnn/run_{}_he_approach.p".format(date), "wb") as fid:
         pickle.dump([history.history, args], fid)
+
+    print("DONE\n\n")
